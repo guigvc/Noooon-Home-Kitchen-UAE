@@ -1,27 +1,25 @@
 import streamlit as st
 import pandas as pd
 import streamlit.components.v1 as components
-import time # 引入时间库，用于强制刷新滚动指令
+import time
 
 # ==========================================
 # ⚙️ 1. 配置区
 # ==========================================
 st.set_page_config(page_title="Noon 家居看板", layout="wide", page_icon="🏠")
 
-# 埋一个隐形的顶部锚点，用于“回到顶部”
 st.markdown('<div id="top_anchor"></div>', unsafe_allow_html=True)
 
 # 数据文件路径
-DATA_FILE = "noon_data.parquet"
+DATA_FILE = r"E:\ZHX\Noon Intel\noon_data.parquet"
 
-# 初始化 Session State
 if 'selected_category_state' not in st.session_state:
     st.session_state.selected_category_state = None
 if 'scroll_trigger_id' not in st.session_state:
-    st.session_state.scroll_trigger_id = 0 # 用于强制触发滚动的唯一ID
+    st.session_state.scroll_trigger_id = 0
 
 # ==========================================
-# 📂 2. 数据读取
+# 📂 2. 数据读取 (核心修复区)
 # ==========================================
 @st.cache_data
 def load_data():
@@ -33,10 +31,17 @@ def load_data():
         elif '所属类目' in df.columns: df['Target_Category'] = df['所属类目']
         else: st.stop()
 
-        # 转数字
-        cols = ['销量数字', '评论数', '价格', '评分', '排名']
-        for c in cols:
-            if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+        # 🔧 核心修复：处理千分位逗号 (例如 "1,680" -> 1680)
+        cols_to_fix = ['销量数字', '评论数', '价格', '评分', '排名']
+        
+        for col in cols_to_fix:
+            if col in df.columns:
+                # 1. 先把这一列全转成字符串
+                # 2. 把里面的逗号 ',' 删掉
+                # 3. 再转成数字
+                df[col] = df[col].astype(str).str.replace(',', '').str.strip()
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
         return df
     except: return pd.DataFrame()
 
@@ -73,7 +78,7 @@ valid_categories = filtered_cats_df['Target_Category'].tolist()
 df_filtered = df[df['Target_Category'].isin(valid_categories)]
 
 # ==========================================
-# 📊 5. 总看板 (已改为 AED)
+# 📊 5. 总看板
 # ==========================================
 st.title("🏠 Noon畅销榜看板-家居-阿联酋")
 c1, c2, c3, c4 = st.columns(4)
@@ -84,15 +89,12 @@ c4.metric("🏆 Top10总销量", f"{filtered_cats_df['Top10销量总和'].sum():
 st.markdown("---")
 
 # ==========================================
-# 🔲 6. 类目矩阵 (交互核心)
+# 🔲 6. 类目矩阵
 # ==========================================
 st.subheader("📋 类目矩阵 (点击查看详情)")
 
 cols_per_row = 5
 rows = [valid_categories[i:i + cols_per_row] for i in range(0, len(valid_categories), cols_per_row)]
-
-# 用于检测是否有点击发生
-clicked_cat = None
 
 for row_cats in rows:
     cols = st.columns(cols_per_row)
@@ -100,21 +102,14 @@ for row_cats in rows:
         cat_data = filtered_cats_df[filtered_cats_df['Target_Category'] == cat_name].iloc[0]
         with cols[index]:
             label = f"**{cat_name}**\n\n🛒 {cat_data['产品总数']} | 🔥 {int(cat_data['Top10销量总和']):,}"
-            
-            # 如果按钮被点击
             if st.button(label, key=cat_name, use_container_width=True):
                 st.session_state.selected_category_state = cat_name
-                # 更新一个随机ID，强制触发 JS 执行
                 st.session_state.scroll_trigger_id = time.time() 
 
-# ==========================================
-# ⚡ 自动滚屏脚本 (核心修复)
-# ==========================================
-# 只有当 ID 变化时，才会执行这段 JS，确保每次点击都有效
+# 自动滚屏脚本
 if st.session_state.scroll_trigger_id > 0:
     js = f"""
     <script>
-        // 使用时间戳 {st.session_state.scroll_trigger_id} 确保脚本是新的
         var element = window.parent.document.getElementById("detail_anchor");
         if (element) {{
             element.scrollIntoView({{behavior: "smooth", block: "start"}});
@@ -127,7 +122,6 @@ if st.session_state.scroll_trigger_id > 0:
 # 🕵️ 7. 类目详细透视
 # ==========================================
 st.markdown("---")
-# 详情区锚点
 st.markdown('<div id="detail_anchor"></div>', unsafe_allow_html=True)
 st.header("🔎 类目详细透视")
 
@@ -155,7 +149,6 @@ if current_cat:
                 with col_info:
                     st.markdown(f"### [#{row['排名']}] {row['产品名']}({row['商品链接']})")
                     m1, m2, m3, m4 = st.columns(4)
-                    # 修正：货币改为 AED
                     m1.metric("价格", f"{row['价格']} AED") 
                     m2.metric("评分", f"{row['评分']} ⭐ ({int(row['评论数'])})")
                     m3.metric("近期销量", f"{int(row['销量数字'])}")
@@ -166,7 +159,6 @@ if current_cat:
                     progress_val = min(sales_val / max_val, 1.0) if max_val > 0 else 0
                     st.progress(progress_val, text=f"全站热度占比: {int(progress_val*100)}%")
     else:
-        # 表格模式
         possible_cols = ['排名', '原图链接', '产品名', '价格', '评分', '评论数', '销量数字', '销量描述', '商品链接']
         final_cols = [c for c in possible_cols if c in subset.columns]
         st.dataframe(
@@ -175,7 +167,6 @@ if current_cat:
                 "原图链接": st.column_config.ImageColumn("图片", width="large"),
                 "商品链接": st.column_config.LinkColumn("链接", display_text="去购买"),
                 "销量数字": st.column_config.ProgressColumn("热度", format="%d", min_value=0, max_value=int(df['销量数字'].max())),
-                # 修正：货币改为 AED
                 "价格": st.column_config.NumberColumn("价格 (AED)", format="%.2f"), 
             },
             use_container_width=True,
@@ -192,9 +183,7 @@ st.markdown("---")
 col_b1, col_b2, col_b3 = st.columns([1, 2, 1])
 
 with col_b2:
-    # 这是一个占满中间宽度的按钮
     if st.button("⬆️ 回到顶部 (选择其他类目)", use_container_width=True):
-        # 触发 JS 滚动到顶部锚点
         js_top = """
         <script>
             var element = window.parent.document.getElementById("top_anchor");
@@ -203,5 +192,4 @@ with col_b2:
             }
         </script>
         """
-
         components.html(js_top, height=0)
