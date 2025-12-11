@@ -10,13 +10,15 @@ st.set_page_config(page_title="Noon 选品看板", layout="wide", page_icon="�
 
 st.markdown('<div id="top_anchor"></div>', unsafe_allow_html=True)
 
-# ⚠️ 本地运行请确认路径正确
+# ⚠️ 数据文件路径
 DATA_FILE = "noon_data.parquet"
 
 if 'selected_category_state' not in st.session_state:
     st.session_state.selected_category_state = None
+
+# ⭐ 核心修复：初始化必须为 0，不能是时间戳，否则一打开就滚
 if 'scroll_trigger_id' not in st.session_state:
-    st.session_state.scroll_trigger_id = 0
+    st.session_state.scroll_trigger_id = 0 
 
 # ==========================================
 # 📂 2. 数据读取
@@ -69,12 +71,12 @@ elif selected_country == "阿联酋": currency_symbol = "AED"
 st.sidebar.markdown("---")
 
 # ==========================================
-# 🧮 4. 数据聚合 (新增评论数统计)
+# 🧮 4. 数据聚合
 # ==========================================
 base_stats = df.groupby('Target_Category').agg(
     产品总数=('产品名', 'count'),
     类目总销量=('销量数字', 'sum'),
-    类目总评论=('评论数', 'sum') # <--- 新增这一行
+    类目总评论=('评论数', 'sum')
 ).reset_index()
 
 def get_top10_sum(group):
@@ -84,29 +86,20 @@ top10_stats = df.groupby('Target_Category').apply(get_top10_sum).reset_index(nam
 category_stats = pd.merge(base_stats, top10_stats, on='Target_Category')
 
 # ==========================================
-# 🎨 5. 筛选与排序 (核心修改区)
+# 🎨 5. 筛选与排序
 # ==========================================
 st.sidebar.header("🔍 筛选与排序")
-
-# ⭐ 新增：排序方式选择
-sort_mode = st.sidebar.radio(
-    "类目方块排序依据：",
-    ["按总销量 (热度)", "按总评论数 (沉淀)"],
-    index=0
-)
-
+sort_mode = st.sidebar.radio("排序依据：", ["按总销量 (热度)", "按总评论数 (沉淀)"], index=0)
 st.sidebar.markdown("---")
 
 min_products = st.sidebar.slider("类目最少产品数", 0, int(category_stats['产品总数'].max()), 10)
 min_sales = st.sidebar.slider("类目最少总销量", 0, int(category_stats['类目总销量'].max()), 0)
 
-# 筛选
 filtered_cats_df = category_stats[
     (category_stats['产品总数'] >= min_products) & 
     (category_stats['类目总销量'] >= min_sales)
 ]
 
-# ⭐ 执行排序逻辑
 if sort_mode == "按总销量 (热度)":
     filtered_cats_df = filtered_cats_df.sort_values(by='类目总销量', ascending=False)
 else:
@@ -119,16 +112,15 @@ df_filtered = df[df['Target_Category'].isin(valid_categories)]
 # 📊 6. 总看板
 # ==========================================
 st.title(f"Noon畅销榜看板 - {selected_country}站")
-
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("📦 筛选后类目", f"{len(valid_categories)}")
 c2.metric("🛒 商品总数", f"{len(df_filtered):,}")
 c3.metric("🔥 累计总销量", f"{filtered_cats_df['类目总销量'].sum():,}")
-c4.metric("💬 累计总评论", f"{filtered_cats_df['类目总评论'].sum():,}") # 新增指标
+c4.metric("💬 累计总评论", f"{filtered_cats_df['类目总评论'].sum():,}")
 st.markdown("---")
 
 # ==========================================
-# 🔲 7. 类目矩阵 (动态显示内容)
+# 🔲 7. 类目矩阵
 # ==========================================
 st.subheader(f"📋 {selected_country} - 类目矩阵")
 st.caption(f"当前排序：{sort_mode}")
@@ -140,20 +132,17 @@ for row_cats in rows:
     cols = st.columns(cols_per_row)
     for index, cat_name in enumerate(row_cats):
         cat_data = filtered_cats_df[filtered_cats_df['Target_Category'] == cat_name].iloc[0]
-        
-        # ⭐ 动态决定方块显示什么数据
-        if "销量" in sort_mode:
-            metric_text = f"🔥 Top10销量: {int(cat_data['Top10销量总和']):,}"
-        else:
-            metric_text = f"💬 总评论数: {int(cat_data['类目总评论']):,}"
+        if "销量" in sort_mode: metric_text = f"🔥 Top10销量: {int(cat_data['Top10销量总和']):,}"
+        else: metric_text = f"💬 总评论数: {int(cat_data['类目总评论']):,}"
 
         with cols[index]:
             label = f"**{cat_name}**\n\n🛒 {cat_data['产品总数']} | {metric_text}"
             if st.button(label, key=cat_name, use_container_width=True):
                 st.session_state.selected_category_state = cat_name
-                st.session_state.scroll_trigger_id = time.time() 
+                # 点击后才设置时间戳
+                st.session_state.scroll_trigger_id = int(time.time())
 
-# 自动滚屏脚本
+# 只有当 ID 大于 0 时（即发生过点击）才滚动
 if st.session_state.scroll_trigger_id > 0:
     js = f"""
     <script>
@@ -177,7 +166,6 @@ if current_cat not in valid_categories:
     current_cat = valid_categories[0] if valid_categories else None
 
 if current_cat:
-    # 这里的排序依然保持按“排名”或“销量”排，因为看单品还是看热度比较多
     subset = df[df['Target_Category'] == current_cat].sort_values(by='排名', ascending=True)
     
     st.markdown(f"### 📦 当前展示: <span style='color:#FF4B4B'>{current_cat}</span> ({selected_country})", unsafe_allow_html=True)
@@ -190,8 +178,13 @@ if current_cat:
             with st.container(border=True):
                 col_img, col_info = st.columns([1, 4])
                 with col_img:
-                    if row['原图链接'] and row['原图链接'].startswith('http'):
-                        st.image(row['原图链接'], use_container_width=True)
+                    raw_url = row['原图链接']
+                    if raw_url and raw_url.startswith('http'):
+                        separator = "&" if "?" in raw_url else "?"
+                        # 只有发生点击后（ID>0）才添加时间戳强制刷新，否则用原链
+                        refresh_id = st.session_state.scroll_trigger_id if st.session_state.scroll_trigger_id > 0 else 0
+                        refresh_url = f"{raw_url}{separator}v={refresh_id}"
+                        st.image(refresh_url, use_container_width=True)
                     else:
                         st.text("无图")
                 with col_info:
@@ -240,5 +233,4 @@ with col_b2:
             }
         </script>
         """
-
         components.html(js_top, height=0)
