@@ -11,7 +11,7 @@ st.set_page_config(page_title="Noon 选品看板", layout="wide", page_icon="�
 st.markdown('<div id="top_anchor"></div>', unsafe_allow_html=True)
 
 # 数据文件路径
-DATA_FILE = r"E:\ZHX\Noon Intel\noon_data.parquet"
+DATA_FILE = "noon_data.parquet"
 
 # 初始化 Session State
 if 'selected_category_state' not in st.session_state:
@@ -233,4 +233,5 @@ with col_b2:
             }
         </script>
         """
+
         components.html(js_top, height=0)
